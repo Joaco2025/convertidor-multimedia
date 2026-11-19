@@ -30,7 +30,7 @@ BORDER = ("#e5e7eb", "#374151")
 COMPONENTS = [
     ("python", "Python 3.10 o superior", "Ejecuta la app", "~26 MB"),
     ("ffmpeg", "FFmpeg", "Convierte audio, video e imágenes animadas", "~87 MB"),
-    ("js", "Motor JavaScript (Deno)", "Lo necesita yt-dlp para YouTube", "~41 MB"),
+    ("js", "Motor JavaScript (Deno o Node)", "Lo necesita yt-dlp para YouTube", "~41 MB"),
     ("app", deps.APP_NAME, "Última versión desde GitHub", "< 1 MB"),
     ("libs", "Librerías de Python", "yt-dlp, CustomTkinter, Pillow, HEIF…", "~45 MB"),
 ]
@@ -46,7 +46,7 @@ class Wizard(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("System")
         self.title(f"Instalar {deps.APP_NAME}")
-        self.geometry("780x530")
+        self.geometry("780x580")
         self.resizable(False, False)
         icon = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "icon.ico")
         if os.path.exists(icon):
@@ -61,7 +61,7 @@ class Wizard(ctk.CTk):
         self.busy = False
         self.update_mode = bool(update_dir)
         self.root_dir = update_dir or deps.registered_dir() or deps.DEFAULT_DIR
-        self.state: dict = {}
+        self.found: dict = {}
         self.page = 0
 
         self.grid_columnconfigure(1, weight=1)
@@ -91,8 +91,8 @@ class Wizard(ctk.CTk):
             lbl = ctk.CTkLabel(side, text=name, font=F(13), text_color="#bfdbfe", anchor="w")
             lbl.pack(fill="x", padx=30, pady=5)
             self.step_lbls.append(lbl)
-        ctk.CTkLabel(side, text=f"github.com/{deps.REPO}", font=F(10), text_color="#bfdbfe",
-                     wraplength=180).pack(side="bottom", pady=14)
+        ctk.CTkLabel(side, text="Código abierto en GitHub", font=F(10), text_color="#bfdbfe").pack(
+            side="bottom", pady=14)
 
     def _navbar(self):
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -159,7 +159,7 @@ class Wizard(ctk.CTk):
             icon = ctk.CTkLabel(box, text="…", width=28, font=F(16, "bold"), text_color=MUTED)
             icon.grid(row=i, column=0, padx=(14, 6), pady=7, sticky="n")
             txt = ctk.CTkFrame(box, fg_color="transparent")
-            txt.grid(row=i, column=1, sticky="ew", pady=5)
+            txt.grid(row=i, column=1, sticky="ew", pady=3)
             ctk.CTkLabel(txt, text=name, font=F(13, "bold"), anchor="w").pack(fill="x")
             detail = ctk.CTkLabel(txt, text=desc, font=F(11), text_color=MUTED, anchor="w", justify="left",
                                   wraplength=360)
@@ -221,7 +221,7 @@ class Wizard(ctk.CTk):
             self.root_dir = deps.safe_install_dir(self.dir_var.get().strip() or deps.DEFAULT_DIR)
             self.dir_var.set(self.root_dir)
         if self.page == 2:
-            if self.state.get("missing"):
+            if self.found.get("missing"):
                 self._install()
             else:
                 self._finalize()
@@ -295,7 +295,9 @@ class Wizard(ctk.CTk):
             st: dict = {"missing": []}
             py = deps.find_python(root)
             st["python"] = py
-            self._report("python", py, f"{py[0]} · {py[1]}" if py else None)
+            where = ("entorno de la app" if py and "venv" in py[1].lower()
+                     else "Microsoft Store" if py and "windowsapps" in py[1].lower() else "sistema")
+            self._report("python", py, f"Python {py[0]} · {where}" if py else None)
             ff = deps.find_ffmpeg(root)
             self._report("ffmpeg", ff, ff)
             js = deps.find_js(root)
@@ -334,7 +336,7 @@ class Wizard(ctk.CTk):
 
     def _install(self):
         root = self.root_dir
-        missing = list(self.state["missing"])
+        missing = list(self.found["missing"])
         self._last_installed = missing
         self.btn_next.configure(text="Instalando...", state="disabled")
 
@@ -344,7 +346,7 @@ class Wizard(ctk.CTk):
                 "python": lambda: deps.install_python(root, self.ctx),
                 "ffmpeg": lambda: deps.install_ffmpeg(root, self.ctx),
                 "js": lambda: deps.install_deno(root, self.ctx),
-                "app": lambda: deps.install_app(root, self.ctx, self.state.get("latest")),
+                "app": lambda: deps.install_app(root, self.ctx, self.found.get("latest")),
                 "libs": lambda: deps.install_libs(root, self._python(root), self.ctx),
             }
             for key, *_ in COMPONENTS:
@@ -421,7 +423,7 @@ class Wizard(ctk.CTk):
             r["status"].configure(text=status, text_color=color)
             r["detail"].configure(text=detail if detail else r["desc"], text_color=BAD if color == BAD else MUTED)
         elif kind == "detected":
-            self.state = data
+            self.found = data
             self._stop_bar()
             if data["missing"] and data["missing"] == getattr(self, "_last_installed", None):
                 # Se instaló pero sigue sin detectarse: no repetir en bucle

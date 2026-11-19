@@ -3,14 +3,38 @@
 App de escritorio para Windows que **descarga** audio/video de más de 1800 sitios y **convierte**
 archivos entre 45 formatos de video, audio e imagen.
 
+## Instalación
+
+Ejecuta **`Instalar-ConvertidorMultimedia.exe`** (~12 MB). Es un asistente clásico:
+
+1. **Bienvenida**
+2. **Ubicación**: por defecto `%LOCALAPPDATA%\Programs\ConvertidorMultimedia`, con accesos directos opcionales en el Escritorio y en el menú Inicio.
+3. **Componentes**: revisa qué tienes y descarga e instala sólo lo que falta. Después vuelve a revisar, hasta que no falte nada:
+   | Componente | Si falta |
+   |---|---|
+   | Python 3.10+ | winget o instalador oficial de python.org (~26 MB) |
+   | FFmpeg | build de yt-dlp/FFmpeg-Builds (~87 MB) |
+   | Deno (motor JS para YouTube) | release oficial de Deno (~41 MB); también sirve Node.js |
+   | La app | última versión de `main` desde este repositorio |
+   | Librerías | entorno `venv` propio con `requirements.txt` |
+4. **Listo**: se abre la app.
+
+No necesita permisos de administrador. Se desinstala desde *Configuración › Aplicaciones*: sólo borra lo que instaló, nunca tus archivos.
+
+## Actualizaciones automáticas
+
+- **yt-dlp**: cada vez que abres la app, consulta PyPI y, si hay una versión nueva, la instala **antes de la primera descarga**, sin reiniciar. Mientras la app siga abierta, vuelve a comprobar cada 6 h.
+- **La app**: si hay commits nuevos en `main`, aparece un aviso con el botón *Actualizar ahora*, que vuelve a abrir el instalador en modo actualización.
+- Las dos opciones se pueden desactivar en *Ajustes*.
+
 ## Funciones
 
 **Descargar** (yt-dlp)
-- Varios enlaces a la vez (uno por línea) en cola, con descargas en paralelo, cancelación y progreso real (MB, velocidad, tiempo restante).
-- Top 15 sitios: YouTube, YouTube Music, TikTok, Instagram, Facebook, X/Twitter, Vimeo, SoundCloud, Twitch, Reddit, Dailymotion, Bandcamp, Bilibili, Pinterest, Mixcloud.
-- Audio: MP3, M4A, AAC, OPUS, OGG, FLAC, WAV, ALAC u original · bitrate 96–320 kbps.
-- Video: MP4, MKV, WEBM, MOV, AVI · resolución de 360p a 4K.
-- Listas de reproducción completas, portada incrustada, metadatos/capítulos, subtítulos, cookies del navegador (para contenido privado o con restricción de edad).
+- Puedes poner varios enlaces a la vez. Se descargan en cola y en paralelo, con progreso real y opción de cancelar.
+- Top 15 sitios: YouTube, YouTube Music, TikTok, Instagram, Facebook, X/Twitter, Vimeo, SoundCloud, Twitch, Reddit, Dailymotion, Bandcamp, Bilibili, Pinterest y Mixcloud.
+- Audio: MP3, M4A, AAC, OPUS, OGG, FLAC, WAV, ALAC u original.
+- Video: MP4, MKV, WEBM, MOV o AVI, de 360p a 4K.
+- Listas de reproducción, portada, metadatos, subtítulos y cookies del navegador.
 
 **Convertir** (FFmpeg + Pillow)
 | Tipo | Formatos de salida (15 c/u) |
@@ -19,12 +43,9 @@ archivos entre 45 formatos de video, audio e imagen.
 | Audio | MP3, WAV, AAC, FLAC, OGG, M4A, WMA, OPUS, AIFF, ALAC, AC3, AMR, MP2, MKA, CAF |
 | Imagen | JPG, PNG, WEBP, GIF, BMP, TIFF, ICO, HEIC, AVIF, PDF, TGA, JP2, PPM, PCX, ICNS |
 
-- Entrada: ~70 extensiones (incluye HEIC de iPhone, PSD, M2TS, RMVB, APE…). Video → audio también funciona.
-- Arrastrar y soltar archivos/carpetas (o enlaces, que van a Descargar).
-- Calidad, resolución, recorte por tiempo, canales, copia sin recodificar (instantánea), redimensionar imágenes, unir varias imágenes en un PDF.
-- Tema claro/oscuro; la configuración y el registro se guardan en `%APPDATA%\ConvertidorMultimedia`.
+También tiene arrastrar y soltar, recorte por tiempo, copia sin recodificar, redimensionado de imágenes y unión de imágenes en un PDF.
 
-## Ejecutar desde el código
+## Desarrollo
 
 ```bash
 python -m pip install -r requirements.txt
@@ -32,27 +53,14 @@ python -m pip install -r requirements.txt
 ```bash
 python main.py
 ```
-Necesita `ffmpeg.exe` y `ffprobe.exe` en el PATH o en la carpeta `bin/` (`winget install yt-dlp.FFmpeg`).
-Para YouTube, yt-dlp usa Deno o Node.js si están instalados.
-
-## Compilar la versión portable
-
+Para compilar el instalador (queda en `dist\`):
 ```bash
-build.bat
+build_installer.bat
 ```
-Resultado: `dist\ConvertidorMultimedia\` (~430 MB, incluye FFmpeg). Comprime esa carpeta en un zip para compartirla.
-`build.bat` actualiza yt-dlp antes de compilar: **vuelve a compilar cada cierto tiempo**, porque los sitios cambian y una versión vieja de yt-dlp deja de funcionar.
-
-## Estructura
 
 ```
 main.py                    punto de entrada
-convertidor/
-  formats.py               catálogo de sitios y formatos
-  downloader.py            motor yt-dlp
-  converter.py             motor FFmpeg / Pillow
-  jobs.py                  cola de trabajos en hilos (sin tocar la UI)
-  settings.py, paths.py    preferencias, rutas, búsqueda de FFmpeg
-  ui/                      ventana, pestañas y componentes (CustomTkinter)
+convertidor/               la app (formats, downloader, converter, jobs, updater, ui/)
+installer/                 asistente de instalación (deps.py = lógica, instalador.py = interfaz)
 legacy/                    versión 1 original
 ```

@@ -248,7 +248,7 @@ def find_ffmpeg(root: str) -> str | None:
     if code != 0:
         return None
     first = out.splitlines()[0] if out else "ffmpeg"
-    return first.replace("ffmpeg version ", "")[:40]
+    return first.replace("ffmpeg version ", "").split(" Copyright")[0][:40]
 
 
 def install_ffmpeg(root: str, ctx: Ctx) -> None:
@@ -275,7 +275,9 @@ def find_js(root: str) -> str | None:
         if exe:
             code, out = quick([exe, "--version"])
             if code == 0:
-                return f"{name} {out.strip().splitlines()[0][:30]}"
+                import re
+                m = re.search(r"(\d+\.\d+\.\d+)", out)
+                return f"{name.capitalize()} {m.group(1) if m else ''}".strip()
     return None
 
 
