@@ -5,7 +5,9 @@ archivos entre 45 formatos de video, audio e imagen.
 
 ## Instalación
 
-Ejecuta **`Instalar-ConvertidorMultimedia.exe`** (~12 MB). Es un asistente clásico:
+**[⬇ Descargar el instalador](https://github.com/Joaco2025/convertidor-multimedia/releases/latest/download/Instalar-ConvertidorMultimedia.exe)** (~12 MB, Windows 10/11). Si aparece el aviso de SmartScreen (el .exe no está firmado), haz clic en *Más información › Ejecutar de todas formas*.
+
+Es un asistente clásico:
 
 1. **Bienvenida**
 2. **Ubicación**: por defecto `%LOCALAPPDATA%\Programs\ConvertidorMultimedia`, con accesos directos opcionales en el Escritorio y en el menú Inicio.
