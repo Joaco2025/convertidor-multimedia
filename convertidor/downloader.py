@@ -1,13 +1,15 @@
-"""Motor de descargas basado en yt-dlp."""
+"""Motor de descargas basado en yt-dlp.
+
+yt-dlp se importa recién en la primera descarga, después de que el
+actualizador (updater.py) haya tenido la oportunidad de instalar la última versión.
+"""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
-import yt_dlp
-from yt_dlp.utils import DownloadCancelled
-
 from . import formats as F
+from . import updater
 from .jobs import Cancelled, JobContext
 from .paths import FFMPEG, js_runtimes
 
@@ -139,7 +141,21 @@ def build_options(req: DownloadRequest) -> dict:
     return opts
 
 
+def _wait_for_updater(ctx: JobContext) -> None:
+    if updater.YTDLP_READY.is_set():
+        return
+    ctx.update(progress=None, message="Esperando la actualización de yt-dlp...")
+    for _ in range(600):  # hasta 5 min; pip suele tardar < 30 s
+        if updater.YTDLP_READY.wait(0.5):
+            return
+        ctx.check_cancel()
+
+
 def run_download(req: DownloadRequest, ctx: JobContext, log) -> str:
+    _wait_for_updater(ctx)
+    import yt_dlp
+    from yt_dlp.utils import DownloadCancelled
+
     os.makedirs(req.dest, exist_ok=True)
     state = {"file": "", "title": ""}
 
@@ -212,4 +228,4 @@ def run_download(req: DownloadRequest, ctx: JobContext, log) -> str:
 
 
 def ytdlp_version() -> str:
-    return yt_dlp.version.__version__
+    return updater.ytdlp_installed()

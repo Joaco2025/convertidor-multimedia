@@ -30,16 +30,33 @@ def exe_dir() -> str:
     return resource_dir()
 
 
+def install_root() -> str | None:
+    """Carpeta de instalación creada por el instalador (contiene app/, venv/, bin/, version.json)."""
+    parent = os.path.dirname(resource_dir())
+    return parent if os.path.isfile(os.path.join(parent, "version.json")) else None
+
+
+def _tool_dirs() -> list[str]:
+    dirs = [exe_dir(), resource_dir(), os.path.join(exe_dir(), "bin"), os.path.join(resource_dir(), "bin")]
+    root = install_root()
+    if root:
+        dirs.insert(0, os.path.join(root, "bin"))
+    return dirs
+
+
 def _find_tool(name: str) -> str | None:
     exe = name + (".exe" if os.name == "nt" else "")
-    # 1) junto al .exe / proyecto (permite actualizar ffmpeg sin recompilar)
-    # 2) dentro del .exe empaquetado   3) carpeta bin/   4) PATH del sistema
-    for folder in (exe_dir(), resource_dir(), os.path.join(exe_dir(), "bin"),
-                   os.path.join(resource_dir(), "bin")):
+    # 1) bin/ de la instalación   2) junto a la app / proyecto   3) PATH del sistema
+    # 4) enlaces de winget (por si el PATH de esta sesión aún no se refrescó)
+    for folder in _tool_dirs():
         candidate = os.path.join(folder, exe)
         if os.path.isfile(candidate):
             return candidate
-    return shutil.which(name)
+    found = shutil.which(name)
+    if found:
+        return found
+    links = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", exe)
+    return links if os.path.isfile(links) else None
 
 
 FFMPEG = _find_tool("ffmpeg")
@@ -50,7 +67,7 @@ def js_runtimes() -> dict:
     """Runtimes de JavaScript para que yt-dlp resuelva los retos de YouTube."""
     found = {}
     for name in ("deno", "node", "bun"):
-        path = shutil.which(name)
+        path = _find_tool(name)
         if path:
             found[name] = {"path": path}
     return found

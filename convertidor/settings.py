@@ -8,6 +8,8 @@ from .paths import config_dir, downloads_dir
 
 DEFAULTS = {
     "theme": "System",
+    "auto_update_ytdlp": True,
+    "check_app_updates": True,
     "download_dir": downloads_dir(),
     "dl_kind": "audio",
     "dl_audio_format": "mp3",

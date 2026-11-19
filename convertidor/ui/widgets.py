@@ -204,6 +204,48 @@ class JobList(ctk.CTkFrame):
         return sum(1 for r in self.rows if not r.finished)
 
 
+class Banners(ctk.CTkFrame):
+    """Avisos apilados bajo la cabecera (actualizaciones, etc.), uno por clave."""
+
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        self.grid_columnconfigure(0, weight=1)
+        self._items: dict[str, ctk.CTkFrame] = {}
+
+    def show(self, key: str, text: str, color=ACCENT, button: tuple[str, object] | None = None,
+             autohide_ms: int | None = None) -> None:
+        self.hide(key)
+        bar = ctk.CTkFrame(self, fg_color=CARD, border_color=color, border_width=1, corner_radius=8)
+        bar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(bar, text="●", text_color=color, font=font(14)).grid(row=0, column=0, padx=(12, 6), pady=6)
+        ctk.CTkLabel(bar, text=text, font=font(12), anchor="w").grid(row=0, column=1, sticky="ew", pady=6)
+        col = 2
+        if button:
+            ctk.CTkButton(bar, text=button[0], height=26, width=110, command=button[1]).grid(
+                row=0, column=col, padx=6, pady=6)
+            col += 1
+        ctk.CTkButton(bar, text="✕", width=26, height=26, fg_color="transparent", text_color=TEXT,
+                      hover_color=CARD_BORDER, command=lambda: self.hide(key)).grid(row=0, column=col, padx=(0, 8))
+        self._items[key] = bar
+        self._relayout()
+        if autohide_ms:
+            self.after(autohide_ms, lambda b=bar: self._items.get(key) is b and self.hide(key))
+
+    def hide(self, key: str) -> None:
+        bar = self._items.pop(key, None)
+        if bar is not None:
+            bar.destroy()
+            self._relayout()
+
+    def _relayout(self) -> None:
+        for i, bar in enumerate(self._items.values()):
+            bar.grid(row=i, column=0, sticky="ew", pady=(0, 6))
+        if self._items:
+            self.grid()
+        else:
+            self.grid_remove()
+
+
 def file_badge(ext: str) -> str:
     return ext.upper()[:4] if ext else "?"
 

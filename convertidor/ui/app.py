@@ -1,27 +1,27 @@
 """Ventana principal."""
 from __future__ import annotations
 
-import json
 import logging
 import os
 import queue
 import subprocess
 import sys
 import threading
-import urllib.request
 from logging.handlers import RotatingFileHandler
 
 import customtkinter as ctk
 
 from .. import formats as F
+from .. import updater
 from ..downloader import ytdlp_version
 from ..jobs import CANCELLED, DONE, ERROR, Job, JobQueue
-from ..paths import (APP_NAME, APP_VERSION, FFMPEG, FFPROBE, config_dir, is_frozen, js_runtimes,
-                     open_folder)
+from ..paths import (APP_NAME, APP_VERSION, FFMPEG, FFPROBE, config_dir, js_runtimes, open_folder)
 from ..settings import Settings
 from .convert_tab import ConvertTab
 from .download_tab import DownloadTab
-from .widgets import BAD, MUTED, OK, WARN, JobList, Section, font, labeled
+from .widgets import ACCENT, BAD, MUTED, OK, WARN, Banners, JobList, Section, font, labeled
+
+YTDLP_RECHECK_MS = 6 * 60 * 60 * 1000  # vuelve a comprobar cada 6 h si la app sigue abierta
 
 try:  # Arrastrar y soltar (opcional)
     from tkinterdnd2 import DND_FILES, DND_TEXT, TkinterDnD
@@ -56,10 +56,13 @@ class App(_Base):
         self.cv_queue = JobQueue(self.events, self.settings["cv_parallel"], self.log)
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         self._build_header()
+        self.banners = Banners(self)
+        self.banners.grid(row=1, column=0, sticky="ew", padx=16)
+        self.banners.grid_remove()
         self.tabs = ctk.CTkTabview(self, anchor="nw", corner_radius=10)
-        self.tabs.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 14))
+        self.tabs.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 14))
         for name in ("⬇  Descargar", "⚙  Convertir", "☰  Ajustes", "📝 Registro"):
             self.tabs.add(name)
             self.tabs.tab(name).grid_columnconfigure(0, weight=1)
@@ -77,6 +80,86 @@ class App(_Base):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(80, self._poll)
         self.log(f"{APP_NAME} {APP_VERSION} · yt-dlp {ytdlp_version()} · FFmpeg: {FFMPEG or 'NO ENCONTRADO'}")
+        self._start_update_checks(initial=True)
+
+    # -- Actualizaciones --------------------------------------------------
+    def _notify(self, kind: str, data) -> None:
+        """Seguro desde cualquier hilo."""
+        self.events.put(("notify", (kind, data)))
+
+    def _start_update_checks(self, initial: bool = False, force_install: bool = False) -> None:
+        auto = force_install or self.settings["auto_update_ytdlp"]
+        threading.Thread(target=updater.check_ytdlp, args=(auto, self.log, self._notify), daemon=True).start()
+        if initial and self.settings["check_app_updates"]:
+            threading.Thread(target=updater.check_app, args=(self.log, self._notify), daemon=True).start()
+        if initial:
+            self.after(YTDLP_RECHECK_MS, self._periodic_check)
+
+    def _periodic_check(self) -> None:
+        self._start_update_checks()
+        self.after(YTDLP_RECHECK_MS, self._periodic_check)
+
+    def _on_notify(self, kind: str, data) -> None:
+        if kind == "app":
+            self.banners.show("app", "Hay una nueva versión de Convertidor Multimedia en GitHub.", ACCENT,
+                              ("Actualizar ahora", self._update_app))
+            return
+        state, current, info = data
+        self.ytdlp_lbl.configure(text=updater.ytdlp_installed())
+        if state == "installing":
+            self.banners.show("ytdlp", f"Actualizando yt-dlp {current} → {info}… las descargas empiezan al terminar.",
+                              WARN)
+        elif state == "updated":
+            self.banners.show("ytdlp", f"yt-dlp actualizado a {info}.", OK, autohide_ms=6000)
+            self.upd_lbl.configure(text=f"Actualizado a {info}.", text_color=OK)
+        elif state == "failed":
+            self.banners.show("ytdlp", f"No se pudo actualizar yt-dlp: {info[:120]}", BAD)
+            self.upd_lbl.configure(text="Falló la actualización (ver Registro).", text_color=BAD)
+        elif state == "restart_needed":
+            self.banners.show("ytdlp", f"Hay una versión nueva de yt-dlp ({info}). Se instala al reiniciar.", WARN,
+                              ("Reiniciar", self._restart))
+            self.upd_lbl.configure(text=f"Disponible {info}: reinicia la app para instalarla.", text_color=WARN)
+        elif state == "available":
+            btn = ("Actualizar", lambda: self._start_update_checks(force_install=True)) \
+                if updater.can_self_update() else None
+            self.banners.show("ytdlp", f"Hay una versión nueva de yt-dlp ({info}, tienes {current}).", WARN, btn)
+            self.upd_lbl.configure(text=f"Disponible {info}.", text_color=WARN)
+        elif state == "ok":
+            self.upd_lbl.configure(text=f"yt-dlp está al día ({current}).", text_color=OK)
+        elif state == "offline":
+            self.upd_lbl.configure(text="Sin conexión: no se pudo comprobar.", text_color=MUTED)
+
+    def _active_jobs(self) -> int:
+        return self.download_tab.jobs.active_count() + self.convert_tab.jobs.active_count()
+
+    def _confirm_stop_jobs(self, action: str) -> bool:
+        active = self._active_jobs()
+        if not active:
+            return True
+        from tkinter import messagebox
+        if not messagebox.askyesno(APP_NAME, f"Hay {active} tarea(s) en curso. ¿Cancelarlas y {action}?"):
+            return False
+        self.download_tab.jobs.cancel_all()
+        self.convert_tab.jobs.cancel_all()
+        return True
+
+    def _restart(self) -> None:
+        if not self._confirm_stop_jobs("reiniciar"):
+            return
+        self.settings.save()
+        subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]],
+                         cwd=os.path.dirname(os.path.abspath(sys.argv[0])), close_fds=True)
+        self.destroy()
+
+    def _update_app(self) -> None:
+        if not self._confirm_stop_jobs("actualizar"):
+            return
+        if updater.launch_installer_update():
+            self.settings.save()
+            self.destroy()
+        else:
+            self.banners.show("app", "No se encontró setup.exe en la carpeta de instalación. "
+                                     "Descarga el instalador desde GitHub.", BAD)
 
     # ------------------------------------------------------------------
     def _set_icon(self) -> None:
@@ -149,14 +232,23 @@ class App(_Base):
         b = sec.body
         rt = ", ".join(js_runtimes()) or "ninguno (YouTube puede fallar: instala Deno o Node.js)"
         rows = [("FFmpeg", FFMPEG or "No encontrado"), ("FFprobe", FFPROBE or "No encontrado"),
-                ("yt-dlp", ytdlp_version()), ("JavaScript", rt),
-                ("Arrastrar y soltar", "Sí" if HAS_DND else "No (instala tkinterdnd2)")]
+                ("JavaScript", rt), ("Arrastrar y soltar", "Sí" if HAS_DND else "No (instala tkinterdnd2)")]
         for i, (k, v) in enumerate(rows):
             labeled(b, i, k, ctk.CTkLabel(b, text=v, font=font(11), anchor="w", wraplength=330, justify="left"))
+        r = len(rows)
+        self.ytdlp_lbl = ctk.CTkLabel(b, text=ytdlp_version(), font=font(11), anchor="w")
+        labeled(b, r, "yt-dlp", self.ytdlp_lbl)
+        self.chk_auto = ctk.CTkCheckBox(b, text="Actualizar yt-dlp automáticamente al abrir la app",
+                                        command=lambda: self._toggle("auto_update_ytdlp", self.chk_auto))
+        self.chk_app = ctk.CTkCheckBox(b, text="Avisarme de nuevas versiones de la app (GitHub)",
+                                       command=lambda: self._toggle("check_app_updates", self.chk_app))
+        for j, (chk, key) in enumerate(((self.chk_auto, "auto_update_ytdlp"), (self.chk_app, "check_app_updates"))):
+            chk.select() if self.settings[key] else chk.deselect()
+            chk.grid(row=r + 1 + j, column=0, columnspan=2, sticky="w", pady=3)
+        ctk.CTkButton(b, text="Buscar actualizaciones ahora", command=self._check_now).grid(
+            row=r + 3, column=0, columnspan=2, sticky="w", pady=(8, 2))
         self.upd_lbl = ctk.CTkLabel(b, text="", font=font(11), text_color=MUTED, anchor="w", wraplength=380)
-        ctk.CTkButton(b, text="Buscar actualización de yt-dlp", command=self._check_update).grid(
-            row=len(rows), column=0, columnspan=2, sticky="w", pady=(8, 2))
-        self.upd_lbl.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="w")
+        self.upd_lbl.grid(row=r + 4, column=0, columnspan=2, sticky="w")
 
         sec = Section(frame, "Sitios de descarga más usados (top 15)")
         sec.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 10))
@@ -182,33 +274,14 @@ class App(_Base):
         self.settings.save()
         q.set_workers(int(value))
 
-    def _check_update(self) -> None:
-        self.upd_lbl.configure(text="Consultando PyPI...", text_color=MUTED)
+    def _toggle(self, key: str, chk) -> None:
+        self.settings[key] = bool(chk.get())
+        self.settings.save()
 
-        def work():
-            try:
-                with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=10) as r:
-                    latest = json.load(r)["info"]["version"]
-            except Exception as exc:  # noqa: BLE001
-                self.events.put(("update", (f"No se pudo consultar: {exc}", BAD, False)))
-                return
-            current = ytdlp_version()
-            if latest == current:
-                self.events.put(("update", (f"yt-dlp está al día ({current}).", OK, False)))
-            elif is_frozen():
-                self.events.put(("update", (f"Hay una versión nueva ({latest}, tienes {current}). "
-                                            "Vuelve a compilar el .exe con build.bat para actualizar.", WARN, False)))
-            else:
-                self.events.put(("update", (f"Actualizando a {latest}...", WARN, False)))
-                proc = subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"],
-                                      capture_output=True, text=True)
-                if proc.returncode == 0:
-                    self.events.put(("update", (f"Actualizado a {latest}. Reinicia la app.", OK, True)))
-                else:
-                    self.log(proc.stderr)
-                    self.events.put(("update", ("Falló la actualización (ver Registro).", BAD, False)))
-
-        threading.Thread(target=work, daemon=True).start()
+    def _check_now(self) -> None:
+        self.upd_lbl.configure(text="Consultando...", text_color=MUTED)
+        threading.Thread(target=updater.check_ytdlp, args=(True, self.log, self._notify), daemon=True).start()
+        threading.Thread(target=updater.check_app, args=(self.log, self._notify), daemon=True).start()
 
     # -- Registro -------------------------------------------------------
     def _build_log(self, tab) -> None:
@@ -238,9 +311,8 @@ class App(_Base):
                 key, payload = self.events.get_nowait()
                 if key == "log":
                     self._append_log(payload)
-                elif key == "update":
-                    text, color, _restart = payload
-                    self.upd_lbl.configure(text=text, text_color=color)
+                elif key == "notify":
+                    self._on_notify(*payload)
                 elif key in self.rows:
                     row, jl = self.rows[key]
                     if row.winfo_exists():
@@ -277,12 +349,7 @@ class App(_Base):
             self.tabs.set("⚙  Convertir")
 
     def _on_close(self) -> None:
-        active = self.download_tab.jobs.active_count() + self.convert_tab.jobs.active_count()
-        if active:
-            from tkinter import messagebox
-            if not messagebox.askyesno(APP_NAME, f"Hay {active} tarea(s) en curso. ¿Cancelarlas y salir?"):
-                return
-            self.download_tab.jobs.cancel_all()
-            self.convert_tab.jobs.cancel_all()
+        if not self._confirm_stop_jobs("salir"):
+            return
         self.settings.save()
         self.destroy()
